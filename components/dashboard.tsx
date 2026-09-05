@@ -210,13 +210,13 @@ export function Dashboard({ initialPersona, onLogout }: { initialPersona: Person
     </div>
 
     <aside className={`right-panel ${!rightPanelOpen ? 'collapsed' : ''}`}>
-        <header className="topbar right-panel-header" style={{ display: workspace === "command" && data ? "flex" : "none", gap: "12px", minWidth: "500px" }}>
+        <header className="topbar right-panel-header" style={{ display: workspace === "command" && data ? "flex" : "none", gap: "12px", minWidth: "450px" }}>
           {workspace === "command" && data && <>
             <HeaderSelect icon={Building2} label="Business unit" value={filters.businessUnit || ""} onChange={(v) => updateFilter("businessUnit", v)} options={data.options.businessUnits} placeholder="All units" />
             <HeaderSelect icon={CalendarDays} label="Period" value={filters.month || ""} onChange={(v) => updateFilter("month", v)} options={data.options.months} placeholder="May – Jul 2026" />
           </>}
         </header>
-        <div className="right-panel-content" style={{ minWidth: "500px" }}>
+        <div className="right-panel-content" style={{ minWidth: "450px" }}>
           {error ? <div className="error-state"><AlertOctagon size={22} /><div><strong>Data unavailable</strong><p>{error}</p></div></div> : loading || !data ? <Skeleton /> : <>
             
             {workspace === "command" && active === "trips" && <Panel title="Trip board" subtitle={`${Number(data.overview.trips).toLocaleString("en-IN")} trips`} action={<div className="table-search"><Search size={15} /><input value={tripSearch} onChange={(e) => setTripSearch(e.target.value)} placeholder="Search..." /></div>}><TripTable rows={data.trips} search={tripSearch} onSelect={setTripSelection} /></Panel>}
@@ -227,9 +227,9 @@ export function Dashboard({ initialPersona, onLogout }: { initialPersona: Person
                 </div>
             )} /></Panel>}
 
-            {workspace === "command" && active === "safety" && <div className="overview-grid safety-page"><Panel title="Alert concentration" subtitle="Categories and severity"><AlertChart data={data.alerts} /></Panel></div>}
+            {workspace === "command" && active === "safety" && <Panel title="Alert concentration" subtitle="Categories and severity"><AlertChart data={data.alerts} /></Panel>}
 
-            {workspace === "command" && active === "experience" && <div className="overview-grid"><Panel title="Experience trend" subtitle="Feedback responses"><MonthlyStory data={data.monthly} persona="transport_manager" /></Panel></div>}
+            {workspace === "command" && active === "experience" && <Panel title="Experience trend" subtitle="Feedback responses"><MonthlyStory data={data.monthly} persona="transport_manager" /></Panel>}
 
             {workspace === "monitoring" && <ActiveMonitoring />}
           </>}
