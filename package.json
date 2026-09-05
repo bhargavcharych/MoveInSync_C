@@ -1,0 +1,32 @@
+{
+  "name": "movesync-pulse",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "db:ingest": ".venv/bin/python scripts/ingest.py",
+    "db:verify": ".venv/bin/python scripts/verify_db.py"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.5.5-r.4",
+    "date-fns": "4.4.0",
+    "lucide-react": "1.41.0",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "recharts": "3.10.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "16.3.4",
+    "typescript": "^5.9.0"
+  }
+}
