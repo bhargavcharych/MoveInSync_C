@@ -39,7 +39,7 @@ export type SafetyDecision = {
   origin: string;
   destination: string;
   shift: string;
-  eventType: "OVER_SPEEDING";
+  eventType: "OVER_SPEEDING" | "EMP GEOFENCE VIOLATION" | "WOMAN TRAVELLING ALONE" | "DEVICE NOT REACHABLE" | "VEHICLE STOPPAGE" | "EMP SIGN OFF TIME VIOLATION" | "PANIC FIXED DEVICE";
   speed: number;
   speedLimit: number;
   excessKph: number;
@@ -48,9 +48,9 @@ export type SafetyDecision = {
   decisionStatus: "pending" | "analyzing" | "classified" | "failed";
   severity: "Sev-1" | "Sev-2" | "Sev-3" | null;
   rationale: string | null;
-  reasonCode: "ISOLATED_BREACH" | "REPEATED_MODERATE_SPEEDING" | "PERSISTENT_DRIVER_PATTERN" | "EXTREME_SPEED" | "POSSIBLE_TELEMETRY_ANOMALY" | null;
-  recommendedAction: "MONITOR" | "START_ENHANCED_MONITORING" | "CALL_DRIVER" | "REQUEST_DRIVER_ESCALATION" | "REQUEST_STOP_TRIP_APPROVAL" | null;
-  humanOwner: "TRANSPORT_MANAGER" | null;
+  reasonCode: string | null;
+  recommendedAction: string | null;
+  humanOwner: string | null;
   approvalRequired: boolean | null;
   confidence: number | null;
   model: string | null;
@@ -79,14 +79,35 @@ const origins = [
 const safetyDecisionSchema = z.object({
   severity: z.enum(["Sev-1", "Sev-2", "Sev-3"]),
   rationale: z.string().min(5).max(500),
-  reason_code: z.enum(["ISOLATED_BREACH", "REPEATED_MODERATE_SPEEDING", "PERSISTENT_DRIVER_PATTERN", "EXTREME_SPEED", "POSSIBLE_TELEMETRY_ANOMALY"]),
-  recommended_action: z.enum(["MONITOR", "START_ENHANCED_MONITORING", "CALL_DRIVER", "REQUEST_DRIVER_ESCALATION", "REQUEST_STOP_TRIP_APPROVAL"]),
-  human_owner: z.literal("TRANSPORT_MANAGER"),
+  reason_code: z.string(),
+  recommended_action: z.string(),
+  human_owner: z.string(),
   approval_required: z.boolean(),
   confidence: z.number().min(0).max(1),
 });
 
 function policyDecision(event: SafetyDecision, readingCount: number) {
+  if (event.eventType === "PANIC FIXED DEVICE" || event.eventType === "WOMAN TRAVELLING ALONE") return {
+    severity: "Sev-1" as const, reasonCode: "SOS_ACTIVATED" as const,
+    action: "DISPATCH_GUARD" as const, approvalRequired: true,
+    rationale: `Critical ${event.eventType} alert triggered; immediate security response required.`,
+  };
+  if (event.eventType === "VEHICLE STOPPAGE") return {
+    severity: "Sev-2" as const, reasonCode: "UNAUTHORIZED_STOP" as const,
+    action: "CALL_DRIVER" as const, approvalRequired: false,
+    rationale: `Vehicle stopped unexpectedly; call driver to verify status.`,
+  };
+  if (event.eventType === "EMP GEOFENCE VIOLATION") return {
+    severity: "Sev-2" as const, reasonCode: "GEOFENCE_BREACH" as const,
+    action: "START_ENHANCED_MONITORING" as const, approvalRequired: false,
+    rationale: `Geofence breached; monitor closely and notify transport team.`,
+  };
+  if (event.eventType !== "OVER_SPEEDING") return {
+    severity: "Sev-3" as const, reasonCode: "POLICY_VIOLATION" as const,
+    action: "MONITOR" as const, approvalRequired: false,
+    rationale: `${event.eventType} alert triggered; log and monitor.`,
+  };
+
   if (readingCount < 3) return {
     severity: "Sev-3" as const, reasonCode: "POSSIBLE_TELEMETRY_ANOMALY" as const,
     action: "MONITOR" as const, approvalRequired: false,
@@ -189,6 +210,12 @@ function addCandidateEvent(s: SimulationState, trip: LiveTrip) {
   s.sequence += 1;
   trip.lastEventTick = s.tick;
   trip.overspeedCount += 1;
+  const eventTypes: Array<SafetyDecision["eventType"]> = [
+  "OVER_SPEEDING", "EMP GEOFENCE VIOLATION", "WOMAN TRAVELLING ALONE", 
+  "DEVICE NOT REACHABLE", "VEHICLE STOPPAGE", "EMP SIGN OFF TIME VIOLATION", 
+  "PANIC FIXED DEVICE"
+];
+  const randomType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
   const event: SafetyDecision = {
     eventId: `sim-${s.startedAt.slice(11, 19).replaceAll(":", "")}-${s.sequence}`,
     tripId: trip.tripId,
@@ -199,7 +226,7 @@ function addCandidateEvent(s: SimulationState, trip: LiveTrip) {
     origin: trip.origin,
     destination: trip.destination,
     shift: trip.shift,
-    eventType: "OVER_SPEEDING",
+    eventType: randomType,
     speed: trip.currentSpeed,
     speedLimit: trip.speedLimit,
     excessKph: trip.currentSpeed - trip.speedLimit,
@@ -235,6 +262,10 @@ function advance(s: SimulationState) {
     trip.telemetry.push({ at: new Date().toISOString(), speed: trip.currentSpeed, limit: trip.speedLimit });
     trip.telemetry = trip.telemetry.slice(-36);
     if (overBy >= 8 && s.tick - trip.lastEventTick >= 5) addCandidateEvent(s, trip);
+    // Random non-speed events: ~1 in 8 ticks per trip, staggered
+    if (s.tick % 7 === index % 7 && Math.random() < 0.35 && s.tick - trip.lastEventTick >= 4) {
+      addCandidateEvent(s, trip);
+    }
   });
 }
 
@@ -247,20 +278,36 @@ export async function getSimulationSnapshot() {
     pendingDecisions: s.events.filter((event) => ["pending", "analyzing"].includes(event.decisionStatus)).length,
     criticalEvents: s.events.filter((event) => event.severity === "Sev-1").length,
     totalEvents: s.events.length,
+    byType: s.events.reduce<Record<string, number>>((acc, e) => { acc[e.eventType] = (acc[e.eventType] || 0) + 1; return acc; }, {}),
   };
-  const vendorRisk = Object.values(s.trips.reduce<Record<string, { vendor: string; activeTrips: number; speedingNow: number; repeatEvents: number; highestSeverity: string }>>((acc, trip) => {
-    const row = acc[trip.vendor] || { vendor: trip.vendor, activeTrips: 0, speedingNow: 0, repeatEvents: 0, highestSeverity: "Clear" };
+  const vendorRisk = Object.values(s.trips.reduce<Record<string, { vendor: string; activeTrips: number; speedingNow: number; repeatEvents: number; highestSeverity: string; eventBreakdown: Record<string, number> }>>((acc, trip) => {
+    const row = acc[trip.vendor] || { vendor: trip.vendor, activeTrips: 0, speedingNow: 0, repeatEvents: 0, highestSeverity: "Clear", eventBreakdown: {} };
     row.activeTrips += 1;
     row.speedingNow += trip.status === "speeding" ? 1 : 0;
     row.repeatEvents += trip.overspeedCount;
     const vendorEvents = s.events.filter((event) => event.vendor === trip.vendor);
+    vendorEvents.forEach((e) => { row.eventBreakdown[e.eventType] = (row.eventBreakdown[e.eventType] || 0) + 1; });
     if (vendorEvents.some((event) => event.severity === "Sev-1")) row.highestSeverity = "Sev-1";
     else if (vendorEvents.some((event) => event.severity === "Sev-2")) row.highestSeverity = "Sev-2";
     else if (vendorEvents.some((event) => event.severity === "Sev-3")) row.highestSeverity = "Sev-3";
     acc[trip.vendor] = row;
     return acc;
   }, {})).sort((a, b) => b.repeatEvents - a.repeatEvents);
-  return { running: s.running, startedAt: s.startedAt, tick: s.tick, counts, trips: s.trips, events: s.events, vendorRisk };
+
+  // Check if simulation is effectively done (all trips near 98% progress)
+  const allDone = s.running && s.trips.every((t) => t.progress >= 95);
+  const vendorSummary = allDone ? vendorRisk.map((v) => ({
+    vendor: v.vendor,
+    totalEvents: Object.values(v.eventBreakdown).reduce((s, n) => s + n, 0),
+    sev1Count: s.events.filter((e) => e.vendor === v.vendor && e.severity === "Sev-1").length,
+    sev2Count: s.events.filter((e) => e.vendor === v.vendor && e.severity === "Sev-2").length,
+    sev3Count: s.events.filter((e) => e.vendor === v.vendor && e.severity === "Sev-3").length,
+    eventBreakdown: v.eventBreakdown,
+    highestSeverity: v.highestSeverity,
+    verdict: v.highestSeverity === "Sev-1" ? "Critical — requires immediate review" : v.highestSeverity === "Sev-2" ? "Warning — needs attention" : "Acceptable",
+  })) : null;
+
+  return { running: s.running, startedAt: s.startedAt, tick: s.tick, counts, trips: s.trips, events: s.events, vendorRisk, vendorSummary, allTripsComplete: allDone };
 }
 
 export async function controlSimulation(action: "start" | "pause" | "reset" | "inject_spike") {
@@ -296,17 +343,18 @@ export async function classifySimulationEvent(eventId: string) {
     throw new Error("SARVAM_API_KEY is not configured");
   }
   const trip = s.trips.find((candidate) => candidate.tripId === event.tripId);
-  const priorEvents = s.events.filter((candidate) => candidate.eventId !== event.eventId && candidate.tripId === event.tripId && candidate.eventType === "OVER_SPEEDING");
-  const vendorEvents = s.events.filter((candidate) => candidate.eventId !== event.eventId && candidate.vendor === event.vendor && candidate.eventType === "OVER_SPEEDING").length;
+  const priorEvents = s.events.filter((candidate) => candidate.eventId !== event.eventId && candidate.tripId === event.tripId && candidate.eventType === event.eventType);
+  const vendorEvents = s.events.filter((candidate) => candidate.eventId !== event.eventId && candidate.vendor === event.vendor && candidate.eventType === event.eventType).length;
   const recentReadings = trip?.telemetry.slice(-6).map((reading) => ({ speed_kph: reading.speed, limit_kph: reading.limit })) || [];
   const prompt = {
     current_event: {
+      event_type: event.eventType,
       speed_kph: event.speed,
       speed_limit_kph: event.speedLimit,
       excess_kph: event.excessKph,
       trip_repeat_count: event.repeatCount,
-      driver_prior_overspeed_events: priorEvents.length,
-      vendor_prior_overspeed_events: vendorEvents,
+      driver_prior_events: priorEvents.length,
+      vendor_prior_events: vendorEvents,
     },
     operational_context: {
       trip_id: event.tripId,
@@ -321,12 +369,18 @@ export async function classifySimulationEvent(eventId: string) {
       telemetry_quality: recentReadings.length >= 3 ? "sufficient readings for simulated trend" : "limited readings; consider anomaly",
     },
     policy_guidance: {
-      isolated_breach: "An isolated 8–14 kph excess is Sev-3: start enhanced monitoring. No approval required.",
-      repeated_moderate: "Two or three moderate breaches are Sev-2: call the driver. No trip-stop authority is implied.",
-      persistent_driver_pattern: "Four or more driver breaches without extreme speed are Sev-2: request driver escalation from the Transport Manager. Approval required.",
-      extreme_speed: "A 25+ kph excess supported by sufficient readings is Sev-1: request Transport Manager approval to stop the trip. Do not claim the stop was executed.",
-      possible_anomaly: "Insufficient or inconsistent readings are Sev-3: monitor and investigate telemetry before attributing behavior.",
-      attribution: "Classify the driver pattern first. Do not escalate the entire vendor from one driver's events, and never use OTA SLA for speed risk.",
+      over_speeding: {
+        isolated_breach: "An isolated 8–14 kph excess is Sev-3: start enhanced monitoring.",
+        repeated_moderate: "Two or three moderate breaches are Sev-2: call the driver.",
+        persistent_driver_pattern: "Four or more driver breaches without extreme speed are Sev-2: request driver escalation.",
+        extreme_speed: "A 25+ kph excess is Sev-1: request Transport Manager approval to stop the trip.",
+      },
+      emp_geofence_violation: "Sev-2: Employee left the designated geofence zone. Start enhanced monitoring and alert transport team.",
+      woman_travelling_alone: "Sev-1: Critical safety event. Dispatch security guard and notify emergency contacts immediately.",
+      device_not_reachable: "Sev-3: Device lost connectivity. Monitor and attempt reconnection. Escalate if offline > 10 mins.",
+      vehicle_stoppage: "Sev-2: Unauthorized vehicle stop detected. Call driver immediately to verify status and safety.",
+      emp_sign_off_time_violation: "Sev-3: Employee sign-off time violated. Log event and notify line manager.",
+      panic_fixed_device: "Sev-1: Panic button activated from fixed device. Dispatch security immediately. Approval required.",
     },
   };
 
@@ -337,21 +391,21 @@ export async function classifySimulationEvent(eventId: string) {
       body: JSON.stringify({
         model: process.env.SARVAM_MODEL || "sarvam-105b",
         messages: [
-          { role: "system", content: "You are the bounded investigation core for live mobility safety. Apply the supplied decision ladder exactly. Distinguish driver, vehicle and vendor; do not make vendor-wide attribution from one driver. Consider frequency, excess speed, recent readings, route/shift and data quality. Do not make every repeat event Sev-1. Consequential actions require Transport Manager approval. Never mention OTA or its SLA in a speed decision. Return one precise reason and action; never invent facts." },
+          { role: "system", content: "You are the bounded investigation core for live mobility safety. You handle 7 event types: OVER_SPEEDING, EMP GEOFENCE VIOLATION, WOMAN TRAVELLING ALONE, DEVICE NOT REACHABLE, VEHICLE STOPPAGE, EMP SIGN OFF TIME VIOLATION, PANIC FIXED DEVICE. Apply the supplied policy guidance for the specific event type. Distinguish driver, vehicle and vendor. Consider frequency, context, and data quality. Consequential actions require Transport Manager approval. Return one precise reason and action; never invent facts." },
           { role: "user", content: JSON.stringify(prompt) },
         ],
         tools: [{
           type: "function",
           function: {
-            name: "record_speed_safety_decision",
-            description: "Record the final safety severity and required operational action.",
+            name: "record_safety_decision",
+            description: "Record the final safety severity and required operational action for any mobility event type.",
             parameters: {
               type: "object",
               properties: {
                 severity: { type: "string", enum: ["Sev-1", "Sev-2", "Sev-3"] },
                 rationale: { type: "string", description: "One concise sentence, maximum 35 words." },
-                reason_code: { type: "string", enum: ["ISOLATED_BREACH", "REPEATED_MODERATE_SPEEDING", "PERSISTENT_DRIVER_PATTERN", "EXTREME_SPEED", "POSSIBLE_TELEMETRY_ANOMALY"] },
-                recommended_action: { type: "string", enum: ["MONITOR", "START_ENHANCED_MONITORING", "CALL_DRIVER", "REQUEST_DRIVER_ESCALATION", "REQUEST_STOP_TRIP_APPROVAL"] },
+                reason_code: { type: "string", description: "Short code for the root cause, e.g. ISOLATED_BREACH, GEOFENCE_BREACH, SOS_ACTIVATED, UNAUTHORIZED_STOP, DEVICE_OFFLINE, SIGN_OFF_VIOLATION, POLICY_VIOLATION, REPEATED_MODERATE_SPEEDING, PERSISTENT_DRIVER_PATTERN, EXTREME_SPEED, POSSIBLE_TELEMETRY_ANOMALY" },
+                recommended_action: { type: "string", description: "Action to take, e.g. MONITOR, START_ENHANCED_MONITORING, CALL_DRIVER, REQUEST_DRIVER_ESCALATION, REQUEST_STOP_TRIP_APPROVAL, DISPATCH_GUARD, NOTIFY_LINE_MANAGER" },
                 human_owner: { type: "string", enum: ["TRANSPORT_MANAGER"] },
                 approval_required: { type: "boolean" },
                 confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -361,7 +415,7 @@ export async function classifySimulationEvent(eventId: string) {
             },
           },
         }],
-        tool_choice: { type: "function", function: { name: "record_speed_safety_decision" } },
+        tool_choice: { type: "function", function: { name: "record_safety_decision" } },
         reasoning_effort: null,
         max_tokens: 500,
       }),
@@ -370,7 +424,7 @@ export async function classifySimulationEvent(eventId: string) {
     if (!response.ok) throw new Error(`Sarvam returned ${response.status}: ${await response.text()}`);
     const payload = await response.json() as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> } }> };
     const toolCall = payload.choices?.[0]?.message?.tool_calls?.[0];
-    if (toolCall?.function?.name !== "record_speed_safety_decision" || !toolCall.function.arguments) {
+    if (toolCall?.function?.name !== "record_safety_decision" || !toolCall.function.arguments) {
       throw new Error("Sarvam returned no structured safety decision");
     }
     const decision = safetyDecisionSchema.parse(JSON.parse(toolCall.function.arguments));
