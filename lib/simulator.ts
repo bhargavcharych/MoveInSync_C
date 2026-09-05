@@ -310,7 +310,7 @@ export async function getSimulationSnapshot() {
   return { running: s.running, startedAt: s.startedAt, tick: s.tick, counts, trips: s.trips, events: s.events, vendorRisk, vendorSummary, allTripsComplete: allDone };
 }
 
-export async function controlSimulation(action: "start" | "pause" | "reset" | "inject_spike") {
+export async function controlSimulation(action: "start" | "pause" | "reset" | "inject_spike" | "speed_run") {
   const s = await ensureSimulation();
   if (action === "start") { s.running = true; s.lastAdvancedAt = Date.now(); }
   if (action === "pause") s.running = false;
@@ -326,7 +326,89 @@ export async function controlSimulation(action: "start" | "pause" | "reset" | "i
     target.forcedSpikeTicks = 4;
     addCandidateEvent(s, target);
   }
+  if (action === "speed_run") {
+    s.running = true;
+    s.lastAdvancedAt = Date.now();
+    // Fast-forward ~150 ticks to complete all trips
+    for (let i = 0; i < 150; i++) {
+      s.tick += 1;
+      s.trips.forEach((trip, index) => {
+        trip.currentSpeed = simulatedSpeed(trip, index, s.tick);
+        trip.progress = Math.min(98, trip.progress + 0.65);
+        trip.etaMinutes = Math.max(1, Math.round((100 - trip.progress) * 0.58));
+        const overBy = trip.currentSpeed - trip.speedLimit;
+        trip.status = overBy >= 10 ? "speeding" : overBy >= 4 ? "attention" : "on_route";
+        trip.telemetry.push({ at: new Date(Date.now() + i * 500).toISOString(), speed: trip.currentSpeed, limit: trip.speedLimit });
+        trip.telemetry = trip.telemetry.slice(-36);
+        if (overBy >= 8 && s.tick - trip.lastEventTick >= 5) addCandidateEvent(s, trip);
+        if (s.tick % 7 === index % 7 && Math.random() < 0.4 && s.tick - trip.lastEventTick >= 4) {
+          addCandidateEvent(s, trip);
+        }
+      });
+    }
+    // Auto-classify all pending events with policy decision (instant, no API call)
+    s.events.forEach((event) => {
+      if (event.decisionStatus !== "pending") return;
+      const trip = s.trips.find((t) => t.tripId === event.tripId);
+      const readingCount = trip?.telemetry.length || 0;
+      const policy = policyDecision(event, readingCount);
+      event.severity = policy.severity;
+      event.rationale = policy.rationale;
+      event.reasonCode = policy.reasonCode;
+      event.recommendedAction = policy.action;
+      event.humanOwner = "TRANSPORT_MANAGER";
+      event.approvalRequired = policy.approvalRequired;
+      event.confidence = 0.82;
+      event.model = "policy-engine (speed-run)";
+      event.decisionStatus = "classified";
+    });
+  }
   return getSimulationSnapshot();
+}
+
+export async function getSpeedRunSummary() {
+  const snapshot = await getSimulationSnapshot();
+  if (!snapshot.vendorSummary) return null;
+
+  const key = process.env.SARVAM_API_KEY;
+  if (!key) return { summary: "Sarvam API key not configured. Showing policy-engine classified results only." };
+
+  const summaryPrompt = {
+    simulation_results: {
+      total_events: snapshot.counts.totalEvents,
+      events_by_type: snapshot.counts.byType,
+      vendor_performance: snapshot.vendorSummary.map((v) => ({
+        vendor: v.vendor,
+        total_events: v.totalEvents,
+        sev1: v.sev1Count,
+        sev2: v.sev2Count,
+        sev3: v.sev3Count,
+        event_types: v.eventBreakdown,
+        verdict: v.verdict,
+      })),
+    },
+  };
+
+  try {
+    const response = await fetch("https://api.sarvam.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-subscription-key": key },
+      body: JSON.stringify({
+        model: process.env.SARVAM_MODEL || "sarvam-105b",
+        messages: [
+          { role: "system", content: "You are a mobility operations analyst. Given simulation results, produce a brief executive summary (max 200 words). Highlight: which vendors are critical and why, what event types dominated, which escalations are needed, and your overall risk assessment. Be concise and actionable. Use bullet points." },
+          { role: "user", content: JSON.stringify(summaryPrompt) },
+        ],
+        max_tokens: 500,
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!response.ok) throw new Error(`Sarvam returned ${response.status}`);
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return { summary: payload.choices?.[0]?.message?.content || "No summary generated." };
+  } catch {
+    return { summary: "Could not generate Sarvam summary. Showing policy-engine classified results." };
+  }
 }
 
 export async function classifySimulationEvent(eventId: string) {

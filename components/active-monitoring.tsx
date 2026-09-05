@@ -64,6 +64,8 @@ export function ActiveMonitoring() {
   const [selectedId, setSelectedId] = useState<string>();
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [speedRunSummary, setSpeedRunSummary] = useState<string | null>(null);
+  const [speedRunning, setSpeedRunning] = useState(false);
   const classifying = useRef<Set<string>>(new Set());
 
   const classifyPending = useCallback(async (snapshot: Simulation) => {
@@ -102,7 +104,7 @@ export function ActiveMonitoring() {
     return () => { window.clearTimeout(immediate); window.clearInterval(timer); };
   }, [poll]);
 
-  async function control(action: "start" | "pause" | "reset" | "inject_spike") {
+  async function control(action: "start" | "pause" | "reset" | "inject_spike" | "speed_run") {
     const response = await fetch("/api/monitoring", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
     const snapshot = await response.json();
     if (response.ok) { setData(snapshot); setError(""); void classifyPending(snapshot); }
