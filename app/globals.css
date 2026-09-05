@@ -259,6 +259,8 @@ button { cursor: pointer; }
 .copilot-container {
   flex: 1;
   padding: 0;
+  margin: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
