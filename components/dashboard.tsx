@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertOctagon, BarChart3, Bell, Building2, CalendarDays, CarFront, Check,
-  ChevronDown, CircleDollarSign, Clock3, Download, Gauge, Headphones, LayoutDashboard,
-  Leaf, Menu, Moon, Radio, Search, ShieldAlert, Sparkles, Star, Sun, UsersRound, X,
+  ChevronDown, CircleDollarSign, Clock3, Gauge, LayoutDashboard,
+  Leaf, Menu, Moon, Radio, Search, ShieldAlert, Sparkles, Star, Sun, UsersRound, X, LogOut, PanelRightClose, PanelRightOpen
 } from "lucide-react";
 import { ActiveMonitoring } from "@/components/active-monitoring";
 import { AgentPanel } from "@/components/agent-panel";
-import { AlertChart, MonthlyStory, OperationsTrend, ShiftChart, Sparkline } from "@/components/charts";
+import { AlertChart, MonthlyStory, Sparkline } from "@/components/charts";
 import { TripDrawer } from "@/components/trip-drawer";
 import type { DashboardFilters, Persona } from "@/lib/types";
 
@@ -32,9 +32,8 @@ const personas: Array<{ id: Persona; label: string; short: string; icon: typeof 
 ];
 
 const navigation = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "trips", label: "Trip board", icon: CarFront },
   { id: "vendors", label: "Vendors", icon: BarChart3 },
+  { id: "trips", label: "Trip board", icon: CarFront },
   { id: "safety", label: "Safety & alerts", icon: ShieldAlert },
   { id: "experience", label: "Experience", icon: Star },
 ];
@@ -64,14 +63,28 @@ function Panel({ title, subtitle, action, children, className = "" }: { title: s
   return <section className={`panel ${className}`}><header><div><h3>{title}</h3>{subtitle && <p>{subtitle}</p>}</div>{action}</header>{children}</section>;
 }
 
-function VendorTable({ rows, selected, onSelect }: { rows: Row[]; selected: string; onSelect: (vendor: string) => void }) {
+function VendorTable({ rows, selected, onSelect, renderExpanded }: { rows: Row[]; selected: string; onSelect: (vendor: string) => void; renderExpanded: (vendor: string) => React.ReactNode }) {
   return <div className="data-table vendor-table"><table><thead><tr><th>Vendor</th><th>Score</th><th>Trips</th><th>OTA / SLA</th><th>CSAT</th><th>Alerts</th><th>EV mix</th><th></th></tr></thead><tbody>{rows.map((row, index) => {
     const ota = Number(row.ota); const pass = ota >= 90;
-    return <tr key={String(row.vendor)} className={selected === row.vendor ? "selected" : ""} onClick={() => onSelect(selected === row.vendor ? "" : String(row.vendor))}>
-      <td><span className="vendor-rank">{index + 1}</span><strong>{row.vendor}</strong></td><td><span className={`score ${Number(row.score) >= 0 ? "positive" : "negative"}`}>{Number(row.score).toFixed(1)}</span></td><td>{Number(row.trips).toLocaleString("en-IN")}</td><td><span className={pass ? "text-good" : "text-risk"}>{row.ota}%</span><small className="sla-marker">/ 90%</small></td><td>{row.csat ? <><Star size={13} fill="#f5a524" color="#f5a524" /> {row.csat}</> : "—"}</td><td>{row.alerts}<small>{Number(row.sev1) > 0 ? ` · ${row.sev1} Sev-1` : ""}</small></td><td>{row.electric_share}%</td><td><ChevronDown size={15} /></td>
-    </tr>;
+    const isExpanded = selected === row.vendor;
+    return (
+      <React.Fragment key={String(row.vendor)}>
+        <tr className={isExpanded ? "selected" : ""} onClick={() => onSelect(isExpanded ? "" : String(row.vendor))}>
+          <td><span className="vendor-rank">{index + 1}</span><strong>{row.vendor}</strong></td><td><span className={`score ${Number(row.score) >= 0 ? "positive" : "negative"}`}>{Number(row.score).toFixed(1)}</span></td><td>{Number(row.trips).toLocaleString("en-IN")}</td><td><span className={pass ? "text-good" : "text-risk"}>{row.ota}%</span><small className="sla-marker">/ 90%</small></td><td>{row.csat ? <><Star size={13} fill="#f5a524" color="#f5a524" /> {row.csat}</> : "—"}</td><td>{row.alerts}<small>{Number(row.sev1) > 0 ? ` · ${row.sev1} Sev-1` : ""}</small></td><td>{row.electric_share}%</td><td><ChevronDown size={15} style={{ transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} /></td>
+        </tr>
+        {isExpanded && (
+          <tr>
+            <td colSpan={8} className="vendor-accordion-content">
+              {renderExpanded(String(row.vendor))}
+            </td>
+          </tr>
+        )}
+      </React.Fragment>
+    );
   })}</tbody></table></div>;
 }
+
+import React from "react";
 
 function TripTable({ rows, onSelect, search }: { rows: Row[]; onSelect: (trip: { business_unit: string; trip_id: string }) => void; search: string }) {
   const filtered = rows.filter((row) => !search || String(row.trip_id).includes(search) || String(row.vendor).toLowerCase().includes(search.toLowerCase()) || String(row.office).toLowerCase().includes(search.toLowerCase()));
@@ -90,17 +103,17 @@ function Skeleton() {
   return <div className="dashboard-skeleton"><div /><div /><div /><div /><section /><section /></div>;
 }
 
-export function Dashboard() {
+export function Dashboard({ initialPersona, onLogout }: { initialPersona: Persona; onLogout: () => void }) {
   const [workspace, setWorkspace] = useState<"command" | "monitoring">("command");
-  const [persona, setPersona] = useState<Persona>("transport_manager");
-  const [active, setActive] = useState("overview");
+  const persona = initialPersona;
+  const [active, setActive] = useState("vendors");
   const [filters, setFilters] = useState<Omit<DashboardFilters, "persona">>({});
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [theme, setTheme] = useState("light");
-  const [agentCollapsed, setAgentCollapsed] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [tripSearch, setTripSearch] = useState("");
   const [tripSelection, setTripSelection] = useState<{ business_unit: string; trip_id: string } | null>(null);
 
@@ -109,7 +122,6 @@ export function Dashboard() {
     const next = saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     queueMicrotask(() => {
       setTheme(next);
-      if (matchMedia("(max-width: 1120px)").matches) setAgentCollapsed(true);
     });
     document.documentElement.dataset.theme = next;
   }, []);
@@ -141,6 +153,7 @@ export function Dashboard() {
     const rows = data.monthly; const last = rows[rows.length - 1]; const prior = rows[rows.length - 2] || last;
     return { ota: Number(last.ota) - Number(prior.ota), spend: Number(last.spend) / Math.max(Number(prior.spend), 1) * 100 - 100, csat: Number(last.csat) - Number(prior.csat) };
   }, [data]);
+  
   const currentPersona = personas.find((p) => p.id === persona)!;
   const metricCards = data ? persona === "facilities_head" ? [
     { label: "Total spend", value: data.overview.spend, formatter: "currency" as const, delta: monthlyDelta.spend, icon: CircleDollarSign, tone: "neutral" as const, sparkKey: "spend" },
@@ -159,64 +172,70 @@ export function Dashboard() {
     { label: "Rider CSAT", value: data.overview.csat, formatter: "decimal" as const, delta: monthlyDelta.csat, icon: Star, tone: "good" as const, sparkKey: "csat" },
   ] : [];
 
-  return <div className={`app-shell ${agentCollapsed ? "agent-collapsed" : ""}`}>
+  return <div className={`app-shell three-col ${!rightPanelOpen ? "right-collapsed" : ""}`}>
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-      <div className="brand"><span><Sparkles size={19} /></span><div><strong>MoveSync</strong><small>Pulse intelligence</small></div><button className="mobile-close" onClick={() => setSidebarOpen(false)}><X size={18} /></button></div>
+      <div className="brand"><span><Sparkles size={19} /></span><div><strong>MoveinSync</strong><small>Pulse intelligence</small></div><button className="mobile-close" onClick={() => setSidebarOpen(false)}><X size={18} /></button></div>
       <div className="workspace-label">{workspace === "command" ? "Command center" : "Active monitoring"}</div>
       {workspace === "command" ? <>
-        <nav>{navigation.map((item) => <button className={active === item.id ? "active" : ""} onClick={() => { setActive(item.id); setSidebarOpen(false); }} key={item.id}><item.icon size={17} /><span>{item.label}</span>{item.id === "safety" && data && Number(data.overview.open_alerts) > 0 && <b>{data.overview.open_alerts > 99 ? "99+" : data.overview.open_alerts}</b>}</button>)}</nav>
-        <div className="sidebar-section"><div className="workspace-label">Saved views</div><button><span className="dot danger" />SLA breaches</button><button><span className="dot warning" />Open Sev-1 alerts</button><button><span className="dot green" />EV performance</button></div>
+        <nav>{navigation.map((item) => <button className={active === item.id ? "active" : ""} onClick={() => { setActive(item.id); setSidebarOpen(false); if (!rightPanelOpen) setRightPanelOpen(true); }} key={item.id}><item.icon size={17} /><span>{item.label}</span>{item.id === "safety" && data && Number(data.overview.open_alerts) > 0 && <b>{data.overview.open_alerts > 99 ? "99+" : data.overview.open_alerts}</b>}</button>)}</nav>
       </> : <>
         <nav><button className="active"><Radio size={17} /><span>Live fleet</span><b>LIVE</b></button></nav>
-        <div className="sidebar-section"><div className="workspace-label">Live intelligence</div><button><span className="dot green" />Active trips</button><button><span className="dot danger" />Speed violations</button><button><span className="dot warning" />AI decisions</button></div>
       </>}
-      <div className="sidebar-bottom"><Headphones size={17} /><span><strong>Hackathon demo</strong><small>5 tables · Read-only</small></span><span className="live-dot" /></div>
+      <div style={{ marginTop: "auto", padding: "16px" }}>
+        <button onClick={onLogout} style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: 600 }}>
+          <LogOut size={16} /> Logout
+        </button>
+      </div>
     </aside>
     {sidebarOpen && <div className="mobile-overlay" onClick={() => setSidebarOpen(false)} />}
 
-    <div className="main-column">
+    <div className="main-column copilot-center">
       <header className="topbar">
         <button className="mobile-menu" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
-        <div className="persona-switch"><span className="persona-avatar">{currentPersona.short}</span><select value={persona} onChange={(e) => { setLoading(true); setError(""); setPersona(e.target.value as Persona); setFilters({}); }} aria-label="Active persona">{personas.map((p) => <option value={p.id} key={p.id}>{p.label}</option>)}</select><ChevronDown size={14} /></div>
+        <div className="persona-switch"><span className="persona-avatar">{currentPersona.short}</span><strong>{currentPersona.label}</strong></div>
         <div className="topbar-separator" />
         <div className="workspace-tabs" role="tablist" aria-label="Product workspace"><button role="tab" aria-selected={workspace === "command"} className={workspace === "command" ? "active" : ""} onClick={() => setWorkspace("command")}><LayoutDashboard size={14} /> Command center</button><button role="tab" aria-selected={workspace === "monitoring"} className={workspace === "monitoring" ? "active" : ""} onClick={() => setWorkspace("monitoring")}><Radio size={14} /> Active monitoring<span className="tab-live-dot" /></button></div>
-        {workspace === "command" && data && <div className="global-filters">
-          <HeaderSelect icon={Building2} label="Business unit" value={filters.businessUnit || ""} onChange={(v) => updateFilter("businessUnit", v)} options={data.options.businessUnits} placeholder="All units" />
-          <HeaderSelect icon={CalendarDays} label="Period" value={filters.month || ""} onChange={(v) => updateFilter("month", v)} options={data.options.months} placeholder="May – Jul 2026" />
-        </div>}
-        <div className="topbar-actions"><button onClick={toggleTheme} title="Toggle theme">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="notification"><Bell size={18} /><i /></button><span className="user-avatar">BK</span></div>
+        
+        <div className="topbar-actions">
+          <button onClick={toggleTheme} title="Toggle theme">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
+          <button onClick={() => setRightPanelOpen(!rightPanelOpen)} title="Toggle Right Panel">
+            {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+          </button>
+        </div>
       </header>
 
-      {workspace === "monitoring" ? <main className="content monitoring-content"><ActiveMonitoring /></main> : <main className="content">
-        <div className="page-heading"><div><div className="eyebrow"><span>Mobility command center</span><i /> Live from locked DuckDB</div><h1>{active === "overview" ? "Good morning, Bhargav" : navigation.find((n) => n.id === active)?.label}</h1><p>{persona === "facilities_head" ? "A leadership-ready view of cost, SLA, safety, experience and sustainability." : persona === "line_manager" ? "Shift readiness, pickup punctuality and rider impact—without billing data." : "Today’s exceptions, vendor accountability and operational signals in one place."}</p></div><div className="page-actions"><button><Download size={15} /> Export brief</button><button className="primary" onClick={() => setAgentCollapsed(false)}><Sparkles size={15} /> Ask copilot</button></div></div>
-
-        {error ? <div className="error-state"><AlertOctagon size={22} /><div><strong>Dashboard unavailable</strong><p>{error}. Confirm the DuckDB file exists and run npm run db:verify.</p></div></div> : loading || !data ? <Skeleton /> : <>
-          {active === "overview" && <>
-            <div className="metric-grid">{metricCards.map((card) => <MetricCard key={card.label} {...card} sparkData={data.monthly} />)}</div>
-            <div className="overview-grid">
-              <Panel title={persona === "line_manager" ? "Pickup readiness trend" : "SLA performance"} subtitle="Daily performance against the 90% on-time benchmark" action={<span className={`benchmark ${data.overview.ota >= 90 ? "pass" : "fail"}`}>{data.overview.ota >= 90 ? "SLA met" : `${(90 - data.overview.ota).toFixed(1)} pt gap`}</span>} className="trend-panel"><OperationsTrend data={data.daily} /></Panel>
-              <Panel title="Three-month story" subtitle={persona === "facilities_head" ? "Spend and unit economics" : "OTA and rider experience"}><MonthlyStory data={data.monthly} persona={persona} /></Panel>
-            </div>
-            <Panel title="Vendor performance" subtitle="Composite score: SLA delivery, rider experience, safety and compliance" action={<button className="text-button" onClick={() => setActive("vendors")}>View all vendors</button>}><VendorTable rows={data.vendors.slice(0, 7)} selected={filters.vendor || ""} onSelect={(v) => updateFilter("vendor", v)} /></Panel>
-            <div className="overview-grid lower">
-              <Panel title={persona === "line_manager" ? "Shifts needing attention" : "Safety signal mix"} subtitle={persona === "line_manager" ? "Late pickups and no-shows by shift" : "Highest-volume alert categories"}>{persona === "line_manager" ? <ShiftChart data={data.shifts} /> : <AlertChart data={data.alerts} />}</Panel>
-              <Panel title="Recent exceptions" subtitle="Prioritized by impact and urgency" action={<button className="text-button" onClick={() => setActive("trips")}>Open board</button>}><div className="exception-list">{data.trips.filter((t) => !t.is_ota || Number(t.alert_count) > 0 || Number(t.noshow_cnt) > 0).slice(0, 5).map((trip) => <button key={`${trip.business_unit}-${trip.trip_id}`} onClick={() => setTripSelection({ business_unit: String(trip.business_unit), trip_id: String(trip.trip_id) })}><span className={`exception-icon ${Number(trip.sev1_count) ? "critical" : !trip.is_ota ? "late" : "watch"}`}>{Number(trip.sev1_count) ? <AlertOctagon size={15} /> : <Clock3 size={15} />}</span><span><strong>Trip #{trip.trip_id}</strong><small>{trip.vendor} · {trip.office}</small></span><span><b className={Number(trip.delay_minutes) > 15 ? "text-risk" : ""}>{Number(trip.delay_minutes) > 0 ? "+" : ""}{trip.delay_minutes} min</b><small>{trip.alert_count} alerts</small></span></button>)}</div></Panel>
-            </div>
-          </>}
-
-          {active === "trips" && <Panel title="Trip board" subtitle={`${Number(data.overview.trips).toLocaleString("en-IN")} trips in the selected operating slice`} action={<div className="table-search"><Search size={15} /><input value={tripSearch} onChange={(e) => setTripSearch(e.target.value)} placeholder="Search trip, vendor, site…" /></div>}><div className="board-summary"><span><i className="green" /> On time <strong>{data.overview.ota}%</strong></span><span><i className="red" /> SLA missed <strong>{(100 - data.overview.ota).toFixed(1)}%</strong></span><span><i className="amber" /> Open alerts <strong>{data.overview.open_alerts}</strong></span><span><i className="blue" /> No-shows <strong>{data.overview.trip_no_shows.toLocaleString("en-IN")}</strong></span></div><TripTable rows={data.trips} search={tripSearch} onSelect={setTripSelection} /></Panel>}
-
-          {active === "vendors" && <><div className="metric-grid compact"><MetricCard label="Vendors active" value={data.vendors.length} formatter="number" icon={Building2} tone="neutral" sparkData={data.monthly} sparkKey="trips" /><MetricCard label="Best OTA" value={Math.max(...data.vendors.map((v) => Number(v.ota)))} formatter="percent" icon={Gauge} tone="good" sparkData={data.monthly} sparkKey="ota" /><MetricCard label="Vendor CSAT" value={data.overview.csat} formatter="decimal" icon={Star} tone="good" sparkData={data.monthly} sparkKey="csat" /><MetricCard label="Sev-1 events" value={data.overview.sev1} formatter="number" icon={ShieldAlert} tone="risk" sparkData={data.monthly} sparkKey="ota" /></div><Panel title="Vendor scorecard" subtitle="Click a vendor to apply it as a dashboard filter"><VendorTable rows={data.vendors} selected={filters.vendor || ""} onSelect={(v) => updateFilter("vendor", v)} /></Panel></>}
-
-          {active === "safety" && <div className="overview-grid safety-page"><Panel title="Alert concentration" subtitle="Event categories, volume and severity"><AlertChart data={data.alerts} /></Panel><Panel title="Response performance" subtitle="Acknowledgement time by event"><div className="alert-response-list">{data.alerts.slice(0, 8).map((alert) => <div key={String(alert.event_type)}><span><i className={Number(alert.sev1) ? "risk" : ""} />{String(alert.event_type).replaceAll("_", " ")}</span><strong>{alert.ack_minutes ?? "—"} min</strong><small>{alert.count} events · {alert.sev1} Sev-1</small></div>)}</div></Panel></div>}
-
-          {active === "experience" && <><div className="metric-grid compact"><MetricCard label="Rider CSAT" value={data.overview.csat} formatter="decimal" delta={monthlyDelta.csat} icon={Star} tone="good" sparkData={data.monthly} sparkKey="csat" /><MetricCard label="No-show rate" value={data.overview.no_show_rate} formatter="percent" icon={UsersRound} tone="risk" sparkData={data.daily} sparkKey="no_shows" /><MetricCard label="Boarded legs" value={data.overview.boarded} formatter="number" icon={Check} tone="good" sparkData={data.daily} sparkKey="trips" /><MetricCard label="Invalid distances" value={data.overview.invalid_distances} formatter="number" icon={AlertOctagon} tone="neutral" sparkData={data.daily} sparkKey="alerts" /></div><div className="overview-grid"><Panel title="Experience trend" subtitle="Non-zero feedback responses only"><MonthlyStory data={data.monthly} persona="transport_manager" /></Panel><Panel title="Shift rider impact" subtitle="Late pickups and no-shows"><ShiftChart data={data.shifts} /></Panel></div></>}
-        </>}
+      <main className="content copilot-container">
+        <AgentPanel persona={persona} filters={filters} mode={workspace} />
       </main>
-      }
     </div>
 
-    <AgentPanel persona={persona} filters={filters} mode={workspace} collapsed={agentCollapsed} onToggle={() => setAgentCollapsed((v) => !v)} />
+    <aside className={`right-panel ${!rightPanelOpen ? 'collapsed' : ''}`}>
+        <header className="topbar right-panel-header" style={{ display: workspace === "command" && data ? "flex" : "none", gap: "12px", minWidth: "500px" }}>
+          {workspace === "command" && data && <>
+            <HeaderSelect icon={Building2} label="Business unit" value={filters.businessUnit || ""} onChange={(v) => updateFilter("businessUnit", v)} options={data.options.businessUnits} placeholder="All units" />
+            <HeaderSelect icon={CalendarDays} label="Period" value={filters.month || ""} onChange={(v) => updateFilter("month", v)} options={data.options.months} placeholder="May – Jul 2026" />
+          </>}
+        </header>
+        <div className="right-panel-content" style={{ minWidth: "500px" }}>
+          {error ? <div className="error-state"><AlertOctagon size={22} /><div><strong>Data unavailable</strong><p>{error}</p></div></div> : loading || !data ? <Skeleton /> : <>
+            
+            {workspace === "command" && active === "trips" && <Panel title="Trip board" subtitle={`${Number(data.overview.trips).toLocaleString("en-IN")} trips`} action={<div className="table-search"><Search size={15} /><input value={tripSearch} onChange={(e) => setTripSearch(e.target.value)} placeholder="Search..." /></div>}><TripTable rows={data.trips} search={tripSearch} onSelect={setTripSelection} /></Panel>}
+
+            {workspace === "command" && active === "vendors" && <Panel title="Vendors" subtitle="Select to filter context"><VendorTable rows={data.vendors} selected={filters.vendor || ""} onSelect={(v) => updateFilter("vendor", v)} renderExpanded={() => (
+                <div className="metric-grid compact" style={{ gridTemplateColumns: "1fr 1fr", gap: "10px", padding: "16px", background: "var(--surface-subtle)", borderRadius: "8px" }}>
+                  {metricCards.map((card) => <MetricCard key={card.label} {...card} sparkData={data.monthly} />)}
+                </div>
+            )} /></Panel>}
+
+            {workspace === "command" && active === "safety" && <div className="overview-grid safety-page"><Panel title="Alert concentration" subtitle="Categories and severity"><AlertChart data={data.alerts} /></Panel></div>}
+
+            {workspace === "command" && active === "experience" && <div className="overview-grid"><Panel title="Experience trend" subtitle="Feedback responses"><MonthlyStory data={data.monthly} persona="transport_manager" /></Panel></div>}
+
+            {workspace === "monitoring" && <ActiveMonitoring />}
+          </>}
+        </div>
+      </aside>
+    
     <TripDrawer selection={tripSelection} persona={persona} onClose={() => setTripSelection(null)} />
   </div>;
 }

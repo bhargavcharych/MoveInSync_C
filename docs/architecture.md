@@ -34,6 +34,14 @@ flowchart LR
 3. `/api/trips/{businessUnit}/{tripId}` resolves the tenant-safe composite key and excludes rider or billing sections according to persona.
 4. `/api/monitoring` advances in-memory telemetry; `/api/monitoring/classify` sends threshold candidates to Sarvam for forced structured decision tool calls.
 5. `/api/agent` exposes one shared, persona-bounded investigation core. A question may combine live simulation evidence with historical DuckDB evidence—for example, a live driver incident followed by the vendor's three-month OTA trend.
+
+### Deterministic analytical path
+
+High-risk analytical questions now pass through `lib/agent/query-spec.ts` and `lib/agent/analytical-engine.ts` before the conversational tool loop. `QuerySpec` retains metric, entity, group-by dimensions, explicit current/comparison dates, benchmark intent, superlative, and controls. The semantic catalog rejects incompatible metric/dimension pairs before SQL runs (for example, driver-level OTA is unavailable and is never replaced with driver rating).
+
+The analytical engine executes parameterized read-only DuckDB queries, records supporting and contradicting evidence per hypothesis, permits `premise_false` and `insufficient_evidence`, and runs the same semantic quality gate before rendering comparison, ranking, explanation, feedback, anomaly, correlation, and target answers. Correlation uses an office/vendor lane result and compares the raw coefficient with office-demeaned residuals. Alert results carry both alert-row and distinct composite-trip counts.
+
+Sarvam remains the conversational and live-classification model. Its tool-loop output now has a final gate for evidence use, requested metric/entity preservation, concise rendering, and tool-syntax leakage. Live speed decisions are separately constrained by the deterministic safety policy and approval boundary.
 6. Sarvam chooses the narrowest tool; the server validates arguments, executes the bounded operation, redacts persona-restricted fields, and returns compact evidence.
 7. Persona routing converts the shared evidence into an Operational Incident, Strategic Decision Brief, or Readiness Alert. Consequential actions are proposals until the responsible human approves them.
 8. The model writes at most three short sentences: finding, relevant context/why, and one owned action. Tool syntax, raw JSON, and evidence dumps are never rendered. Compact evidence UI appears only when the user explicitly asks to show, list, compare, chart, or break down data.

@@ -385,7 +385,7 @@ export async function classifySimulationEvent(eventId: string) {
     event.recommendedAction = policy.action;
     event.humanOwner = decision.human_owner;
     event.approvalRequired = policy.approvalRequired;
-    event.confidence = isPolicyConsistent ? decision.confidence : Math.min(decision.confidence, 0.85);
+    event.confidence = isPolicyConsistent ? Math.min(decision.confidence, 0.9) : Math.min(decision.confidence, 0.85);
     event.model = process.env.SARVAM_MODEL || "sarvam-105b";
     event.decisionStatus = "classified";
     return event;

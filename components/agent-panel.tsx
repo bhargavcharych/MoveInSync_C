@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, Send, Sparkles, UserRound } from "lucide-react";
+import { Bot, Send, Sparkles, UserRound } from "lucide-react";
 import type { ChatMessage, DashboardFilters, Persona, UiBlock } from "@/lib/types";
 
 const starters: Record<Persona, string[]> = {
@@ -30,7 +30,7 @@ function GeneratedBlock({ block }: { block: UiBlock }) {
   );
 }
 
-export function AgentPanel({ persona, filters, mode, collapsed, onToggle }: { persona: Persona; filters: Omit<DashboardFilters, "persona">; mode: "command" | "monitoring"; collapsed: boolean; onToggle: () => void }) {
+export function AgentPanel({ persona, filters, mode }: { persona: Persona; filters: Omit<DashboardFilters, "persona">; mode: "command" | "monitoring" }) {
   const [messages, setMessages] = useState<ChatMessage[]>([{
     role: "assistant",
     content: "I’m watching the selected slice of mobility operations. Ask me to compare an SLA, find a root cause, or build an action queue.",
@@ -61,31 +61,29 @@ export function AgentPanel({ persona, filters, mode, collapsed, onToggle }: { pe
   }
 
   return (
-    <aside className={`agent-panel ${collapsed ? "collapsed" : ""}`}>
-      <button className="agent-header" onClick={onToggle} aria-expanded={!collapsed}>
+    <aside className="agent-panel inline-agent-panel">
+      <div className="agent-header inline-agent-header">
         <span className="agent-avatar"><Sparkles size={17} /></span>
         <span><strong>Mobility Copilot</strong><small><i /> Sarvam 105B · live API</small></span>
-        <ChevronDown size={17} />
-      </button>
-      {!collapsed && <>
-        <div className="agent-context"><span>Context</span><strong>{mode === "monitoring" ? "Live monitoring" : filters.businessUnit || "All business units"}</strong><b>·</b><strong>{mode === "monitoring" ? "Real-time" : filters.month || "May–Jul"}</strong></div>
-        <div className="agent-messages">
-          {messages.map((message, index) => (
-            <div className={`message ${message.role}`} key={index}>
-              <div className="message-icon">{message.role === "assistant" ? <Bot size={15} /> : <UserRound size={15} />}</div>
-              <div className="message-body"><p>{message.content}</p>{message.blocks?.map((block, i) => <GeneratedBlock block={block} key={i} />)}</div>
-            </div>
-          ))}
-          {busy && <div className="message assistant"><div className="message-icon"><Bot size={15} /></div><div className="agent-thinking"><i /><i /><i /></div></div>}
-          <div ref={endRef} />
-        </div>
-        {messages.length < 3 && <div className="prompt-starters">{(mode === "monitoring" ? ["What needs intervention now?", "Explain the latest AI severity", "Which vendor is repeating violations?"] : starters[persona]).map((starter) => <button key={starter} onClick={() => send(starter)}>{starter}</button>)}</div>}
-        <div className="agent-compose">
-          <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about SLA, vendors, trips…" rows={2} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-          <button onClick={() => send()} disabled={!input.trim() || busy} aria-label="Send"><Send size={16} /></button>
-          <small>Real Sarvam API · claims constrained to approved read-only tools.</small>
-        </div>
-      </>}
+        <button onClick={() => setMessages([{ role: "assistant", content: "I’m watching the selected slice of mobility operations. Ask me to compare an SLA, find a root cause, or build an action queue." }])} title="New chat" style={{ marginLeft: "auto", background: "transparent", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 8px", cursor: "pointer", fontSize: "10px", color: "var(--text-muted)", pointerEvents: "auto" }}>New chat</button>
+      </div>
+      <div className="agent-context"><span>Context</span><strong>{mode === "monitoring" ? "Live monitoring" : filters.businessUnit || "All business units"}</strong><b>·</b><strong>{mode === "monitoring" ? "Real-time" : filters.month || "May–Jul"}</strong></div>
+      <div className="agent-messages">
+        {messages.map((message, index) => (
+          <div className={`message ${message.role}`} key={index}>
+            <div className="message-icon">{message.role === "assistant" ? <Bot size={15} /> : <UserRound size={15} />}</div>
+            <div className="message-body"><p>{message.content}</p>{message.blocks?.map((block, i) => <GeneratedBlock block={block} key={i} />)}</div>
+          </div>
+        ))}
+        {busy && <div className="message assistant"><div className="message-icon"><Bot size={15} /></div><div className="agent-thinking"><i /><i /><i /></div></div>}
+        <div ref={endRef} />
+      </div>
+      {messages.length < 3 && <div className="prompt-starters">{(mode === "monitoring" ? ["What needs intervention now?", "Explain the latest AI severity", "Which vendor is repeating violations?"] : starters[persona]).map((starter) => <button key={starter} onClick={() => send(starter)}>{starter}</button>)}</div>}
+      <div className="agent-compose">
+        <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about SLA, vendors, trips…" rows={2} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
+        <button onClick={() => send()} disabled={!input.trim() || busy} aria-label="Send"><Send size={16} /></button>
+        <small>Real Sarvam API · claims constrained to approved read-only tools.</small>
+      </div>
     </aside>
   );
 }
